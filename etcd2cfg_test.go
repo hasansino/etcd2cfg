@@ -560,6 +560,7 @@ func TestSync(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type DummyClient struct {
+	sync.RWMutex
 	data map[string]string
 }
 
@@ -569,6 +570,8 @@ func NewDummyClient() *DummyClient {
 
 func (cl *DummyClient) Get(_ context.Context, key string, _ ...etcdClient.OpOption,
 ) (*etcdClient.GetResponse, error) {
+	cl.RLock()
+	defer cl.RUnlock()
 	resp := &etcdClient.GetResponse{Kvs: []*mvccpb.KeyValue{}}
 	if val, ok := cl.data[key]; ok {
 		resp.Count = 1
@@ -581,12 +584,16 @@ func (cl *DummyClient) Get(_ context.Context, key string, _ ...etcdClient.OpOpti
 
 func (cl *DummyClient) Put(_ context.Context, key, val string, _ ...etcdClient.OpOption,
 ) (*etcdClient.PutResponse, error) {
+	cl.Lock()
+	defer cl.Unlock()
 	cl.data[key] = val
 	return nil, nil
 }
 
 func (cl *DummyClient) Delete(_ context.Context, key string, _ ...etcdClient.OpOption,
 ) (*etcdClient.DeleteResponse, error) {
+	cl.Lock()
+	defer cl.Unlock()
 	delete(cl.data, key)
 	return nil, nil
 }
