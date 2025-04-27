@@ -35,7 +35,7 @@ func DisableCache() Option {
 	}
 }
 
-// WithRunInterval sets a run interval for Attach pattern.
+// WithRunInterval sets a run interval for Sync pattern.
 func WithRunInterval(interval time.Duration) Option {
 	return func(cfg *config) {
 		cfg.runInterval = interval

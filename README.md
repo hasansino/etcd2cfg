@@ -5,7 +5,7 @@ Configuration binding to etcd data.
 Features:
 
 * Logging with `slog` compatible logger (debug+errors)
-* Attach mode, which updates configuration periodically
+* Sync mode, which updates configuration periodically
 * Callbacks when values are updated
 * Supports strings, integers, floats, booleans, string slices and time.Duration
 
@@ -127,7 +127,7 @@ func main() {
 
 	// Start auto-updating in background
 	go func() {
-		err := etcd2cfg.Attach(
+		err := etcd2cfg.Sync(
 			ctx,
 			cfg, // Must implement sync.Locker
 			client,
@@ -222,7 +222,7 @@ func main() {
 
 	// Start auto-updating in background with callback
 	go func() {
-		err := etcd2cfg.Attach(
+		err := etcd2cfg.Sync(
 			ctx,
 			dbConfig,
 			client,
@@ -340,7 +340,7 @@ func main() {
 
 	// Start auto-updating in background with all options
 	go func() {
-		err := etcd2cfg.Attach(
+		err := etcd2cfg.Sync(
 			ctx,
 			cfg,
 			client,

@@ -40,9 +40,9 @@ type config struct {
 	callbacks     []CallbackFn
 }
 
-// Attach to a target object and bind its fields to etcd values.
+// Sync to a target object and bind its fields to etcd values.
 // Runs every 5 minutes, can be changed with WithRunInterval option.
-func Attach(
+func Sync(
 	ctx context.Context,
 	target sync.Locker,
 	client etcdClientAccessor,

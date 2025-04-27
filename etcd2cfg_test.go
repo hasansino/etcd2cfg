@@ -93,7 +93,7 @@ type missingKeyCfg struct {
 	Missing string `etcd:"example.com/domain/service/non_existent_key"`
 }
 
-func _initTest(t *testing.T) (etcdClientAccessor, error) {
+func _initTest(_ *testing.T) (etcdClientAccessor, error) {
 	var client etcdClientAccessor
 	if runIntegrationTests {
 		config := etcdClient.Config{
