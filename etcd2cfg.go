@@ -61,26 +61,31 @@ func Sync(
 	for _, opt := range opts {
 		opt(libCfg)
 	}
-	ticker := time.NewTicker(libCfg.runInterval)
-	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			libCfg.logger.Debug("binding -> running")
-			target.Lock()
-			err := bind(libCfg, target)
-			if err != nil {
-				libCfg.logger.Error(
-					"binding -> failed to bind",
-					slog.String("error", err.Error()),
-				)
+	go func() {
+		ticker := time.NewTicker(libCfg.runInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				libCfg.logger.Debug("binding -> running")
+				target.Lock()
+				err := bind(libCfg, target)
+				if err != nil {
+					libCfg.logger.Error(
+						"binding -> failed to bind",
+						slog.String("error", err.Error()),
+					)
+				}
+				target.Unlock()
 			}
-			target.Unlock()
 		}
-	}
+	}()
+
+	return nil
 }
 
 // Bind the configuration to the given struct.
