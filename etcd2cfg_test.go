@@ -147,11 +147,12 @@ func TestBind(t *testing.T) {
 	}
 	defer wrapUp(client)
 
-	loggerOpts := &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: true}
-	slogHandler := slog.NewTextHandler(os.Stdout, loggerOpts)
-	logger := slog.New(slogHandler)
-	opts := []Option{WithLogger(logger)}
-	opts = nil // enable/disable logging
+	opts := make([]Option, 0)
+
+	//loggerOpts := &slog.HandlerOptions{Level: slog.LevelDebug, AddSource: true}
+	//slogHandler := slog.NewTextHandler(os.Stdout, loggerOpts)
+	//logger := slog.New(slogHandler)
+	//opts = append(opts, WithLogger(logger))
 
 	t.Run("SuccessfulBinding", func(t *testing.T) {
 		cfg := new(testCfg)

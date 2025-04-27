@@ -269,7 +269,7 @@ func processBinding(libCfg *config, f reflect.StructField, v reflect.Value, path
 		}
 		v.Set(reflect.ValueOf(slice))
 	default:
-		return errors.New(fmt.Sprintf("field %s have unsupported type %s", f.Name, v.Type()))
+		return fmt.Errorf("field %s have unsupported type %s", f.Name, v.Type())
 	}
 
 	// callback section
