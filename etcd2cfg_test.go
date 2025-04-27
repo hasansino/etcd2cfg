@@ -5,6 +5,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,9 +89,47 @@ type testCfg struct {
 	ZeroDuration time.Duration `etcd:"example.com/domain/service/zero_duration"`
 }
 
-// Config for missing key testing
-type missingKeyCfg struct {
-	Missing string `etcd:"example.com/domain/service/non_existent_key"`
+func newTestCfg() *testCfg {
+	return &testCfg{
+		Slice:      make([]string, 0),
+		EmptySlice: make([]string, 0),
+	}
+}
+
+type testCfgSync struct {
+	sync.Mutex
+	String    string        `etcd:"example.com/domain/service/string"`
+	BoolTrue  bool          `etcd:"example.com/domain/service/bool_true"`
+	BoolFalse bool          `etcd:"example.com/domain/service/bool_false"`
+	Int       int           `etcd:"example.com/domain/service/int"`
+	Int8      int8          `etcd:"example.com/domain/service/int8"`
+	Int16     int16         `etcd:"example.com/domain/service/int16"`
+	Int32     int32         `etcd:"example.com/domain/service/int32"`
+	Int64     int64         `etcd:"example.com/domain/service/int64"`
+	Uint      uint          `etcd:"example.com/domain/service/uint"`
+	Uint8     uint8         `etcd:"example.com/domain/service/uint8"`
+	Uint16    uint16        `etcd:"example.com/domain/service/uint16"`
+	Uint32    uint32        `etcd:"example.com/domain/service/uint32"`
+	Uint64    uint64        `etcd:"example.com/domain/service/uint64"`
+	Float32   float32       `etcd:"example.com/domain/service/float32"`
+	Float64   float64       `etcd:"example.com/domain/service/float64"`
+	Slice     []string      `etcd:"example.com/domain/service/slice"`
+	Duration  time.Duration `etcd:"example.com/domain/service/duration"`
+	Duration2 time.Duration `etcd:"example.com/domain/service/duration2"`
+
+	EmptyString  string        `etcd:"example.com/domain/service/empty_string"`
+	ZeroInt      int           `etcd:"example.com/domain/service/zero_int"`
+	EmptySlice   []string      `etcd:"example.com/domain/service/empty_slice"`
+	MaxInt64     int64         `etcd:"example.com/domain/service/max_int64"`
+	MinInt64     int64         `etcd:"example.com/domain/service/min_int64"`
+	ZeroDuration time.Duration `etcd:"example.com/domain/service/zero_duration"`
+}
+
+func newTestCfgSync() *testCfgSync {
+	return &testCfgSync{
+		Slice:      make([]string, 0),
+		EmptySlice: make([]string, 0),
+	}
 }
 
 func _initTest(_ *testing.T) (etcdClientAccessor, error) {
@@ -155,12 +194,12 @@ func TestBind(t *testing.T) {
 	//opts = append(opts, WithLogger(logger))
 
 	t.Run("SuccessfulBinding", func(t *testing.T) {
-		cfg := new(testCfg)
+		cfg := newTestCfg()
+
 		if err := Bind(cfg, client, opts...); err != nil {
 			t.Fatalf("failed to bind configuration: %v", err)
 		}
 
-		// Table-driven test cases
 		testCases := []struct {
 			name     string
 			actual   interface{}
@@ -208,7 +247,6 @@ func TestBind(t *testing.T) {
 			cfg         interface{}
 			expectedErr bool
 		}{
-			{"MissingKey", &missingKeyCfg{}, true},
 			{"NilConfig", nil, true},
 			{"NonPointerConfig", testCfg{}, true},
 		}
@@ -306,7 +344,7 @@ func TestBind(t *testing.T) {
 		assert.Equal(t, "initial", cfg.String)
 
 		// Second bind to trigger update and callback
-		err = Bind(cfg, mockClient, WithCallback(callback), DisableCache())
+		err = Bind(cfg, mockClient, WithCallback(callback))
 		require.NoError(t, err)
 
 		// Verify callback was called with correct values
@@ -319,6 +357,208 @@ func TestBind(t *testing.T) {
 	})
 }
 
+// ---------------------------------------------------------------------------
+
+func TestSync(t *testing.T) {
+	client, err := _initTest(t)
+	if err != nil {
+		t.Fatalf("failed to initialize test: %v", err)
+	}
+	defer wrapUp(client)
+
+	t.Run("SuccessfulSync", func(t *testing.T) {
+		cfg := newTestCfgSync()
+		cfg.String = "initial"
+
+		err := Sync(context.Background(), cfg, client, WithRunInterval(100*time.Millisecond))
+		require.NoError(t, err)
+
+		cfg.Lock()
+		assert.Equal(t, "test-string", cfg.String)
+		cfg.Unlock()
+
+		_, err = client.Put(context.Background(), "example.com/domain/service/string", "updated-value")
+		require.NoError(t, err)
+
+		time.Sleep(500 * time.Millisecond)
+
+		cfg.Lock()
+		assert.Equal(t, "updated-value", cfg.String)
+		cfg.Unlock()
+
+		_, err = client.Put(context.Background(), "example.com/domain/service/string", "updated-value-2")
+		require.NoError(t, err)
+
+		time.Sleep(500 * time.Millisecond)
+
+		cfg.Lock()
+		assert.Equal(t, "updated-value-2", cfg.String)
+		cfg.Unlock()
+
+		_, err = client.Put(context.Background(), "example.com/domain/service/string", "test-string")
+		require.NoError(t, err)
+	})
+
+	t.Run("SyncWithNilClient", func(t *testing.T) {
+		ctx := context.Background()
+		cfg := &testCfgSync{}
+		err := Sync(ctx, cfg, nil)
+		assert.Error(t, err, "should return an error with nil client")
+	})
+
+	t.Run("SyncWithNilTarget", func(t *testing.T) {
+		ctx := context.Background()
+		err := Sync(ctx, nil, client)
+		assert.Error(t, err, "should return an error with nil target")
+	})
+
+	t.Run("SyncWithCustomOptions", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		cfg := &testCfgSync{}
+		customLogger := slog.New(
+			slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}),
+		)
+		customOpts := []Option{
+			WithLogger(customLogger),
+			WithRunInterval(1 * time.Hour), // Long interval so it doesn't run during test
+		}
+
+		err := Sync(ctx, cfg, client, customOpts...)
+		assert.NoError(t, err, "should sync successfully with custom options")
+	})
+
+	t.Run("SyncWithCallback", func(t *testing.T) {
+		// Setup mock client
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockClient := mocks.NewMocketcdClientAccessor(ctrl)
+
+		// Setup response for the initial Get
+		initialResp := &etcdClient.GetResponse{
+			Kvs: []*mvccpb.KeyValue{
+				{
+					Key:   []byte("example.com/domain/service/string"),
+					Value: []byte("initial-value"),
+				},
+			},
+		}
+
+		// Setup response for the second Get (after ticker fires)
+		updatedResp := &etcdClient.GetResponse{
+			Kvs: []*mvccpb.KeyValue{
+				{
+					Key:   []byte("example.com/domain/service/string"),
+					Value: []byte("updated-value"),
+				},
+			},
+		}
+
+		// Use AnyTimes() to allow any number of calls
+		mockClient.EXPECT().
+			Get(gomock.Any(), "example.com/domain/service/string", gomock.Any()).
+			Return(initialResp, nil).
+			Times(1)
+
+		mockClient.EXPECT().
+			Get(gomock.Any(), "example.com/domain/service/string", gomock.Any()).
+			Return(updatedResp, nil).
+			AnyTimes()
+
+		// Create a context that can be canceled
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Create test config struct with mutex
+		type testConfig struct {
+			sync.Mutex
+			String string `etcd:"example.com/domain/service/string"`
+		}
+		cfg := &testConfig{}
+
+		// Track callback invocation
+		var callbackMutex sync.Mutex
+		callbackCalled := false
+		callbackKey := ""
+		callbackField := ""
+		var oldValue, newValue interface{}
+
+		callback := func(key string, field string, old, new interface{}) error {
+			callbackMutex.Lock()
+			defer callbackMutex.Unlock()
+			callbackCalled = true
+			callbackKey = key
+			callbackField = field
+			oldValue = old
+			newValue = new
+			return nil
+		}
+
+		// Sync with callback and short interval
+		err := Sync(ctx, cfg, mockClient,
+			WithCallback(callback),
+			WithRunInterval(100*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		// Wait for the initial sync
+		time.Sleep(50 * time.Millisecond)
+
+		// Check initial value
+		cfg.Lock()
+		assert.Equal(t, "initial-value", cfg.String)
+		cfg.Unlock()
+
+		// Wait for the second sync
+		time.Sleep(200 * time.Millisecond)
+
+		// Verify callback was called with correct values
+		callbackMutex.Lock()
+		assert.True(t, callbackCalled)
+		assert.Equal(t, "example.com/domain/service/string", callbackKey)
+		assert.Equal(t, "String", callbackField)
+		assert.Equal(t, "initial-value", oldValue)
+		assert.Equal(t, "updated-value", newValue)
+		callbackMutex.Unlock()
+
+		// Check updated value
+		cfg.Lock()
+		assert.Equal(t, "updated-value", cfg.String)
+		cfg.Unlock()
+
+		// Cancel the context to stop the sync goroutine
+		cancel()
+
+		// Wait a bit to ensure the goroutine has time to exit
+		time.Sleep(200 * time.Millisecond)
+	})
+
+	t.Run("ContextCancellation", func(t *testing.T) {
+		// Create a context that will be canceled
+		ctx, cancel := context.WithCancel(context.Background())
+
+		cfg := &testCfgSync{}
+		err := Sync(ctx, cfg, client, WithRunInterval(100*time.Millisecond))
+		require.NoError(t, err)
+
+		// Wait for the first sync to happen
+		time.Sleep(200 * time.Millisecond)
+
+		// Cancel the context to stop the sync goroutine
+		cancel()
+
+		// Wait a bit to ensure the goroutine has time to exit
+		time.Sleep(200 * time.Millisecond)
+
+		// No way to directly test that the goroutine has exited,
+		// but we can check that the function returned successfully
+		assert.NoError(t, err)
+	})
+}
+
+// ---------------------------------------------------------------------------
+
 type DummyClient struct {
 	data map[string]string
 }
@@ -327,30 +567,25 @@ func NewDummyClient() *DummyClient {
 	return &DummyClient{data: make(map[string]string)}
 }
 
-func (cl *DummyClient) Get(
-	_ context.Context, key string, _ ...etcdClient.OpOption,
+func (cl *DummyClient) Get(_ context.Context, key string, _ ...etcdClient.OpOption,
 ) (*etcdClient.GetResponse, error) {
-	resp := &etcdClient.GetResponse{
-		Kvs: []*mvccpb.KeyValue{},
-	}
+	resp := &etcdClient.GetResponse{Kvs: []*mvccpb.KeyValue{}}
 	if val, ok := cl.data[key]; ok {
+		resp.Count = 1
 		resp.Kvs = append(resp.Kvs, &mvccpb.KeyValue{
 			Value: []byte(val),
 		})
-
 	}
 	return resp, nil
 }
 
-func (cl *DummyClient) Put(
-	_ context.Context, key, val string, _ ...etcdClient.OpOption,
+func (cl *DummyClient) Put(_ context.Context, key, val string, _ ...etcdClient.OpOption,
 ) (*etcdClient.PutResponse, error) {
 	cl.data[key] = val
 	return nil, nil
 }
 
-func (cl *DummyClient) Delete(
-	_ context.Context, key string, _ ...etcdClient.OpOption,
+func (cl *DummyClient) Delete(_ context.Context, key string, _ ...etcdClient.OpOption,
 ) (*etcdClient.DeleteResponse, error) {
 	delete(cl.data, key)
 	return nil, nil

@@ -28,13 +28,6 @@ func WithClientTimeout(timeout time.Duration) Option {
 	}
 }
 
-// DisableCache disables caching of etcd requests.
-func DisableCache() Option {
-	return func(cfg *config) {
-		cfg.disableCache = true
-	}
-}
-
 // WithRunInterval sets a run interval for Sync pattern.
 func WithRunInterval(interval time.Duration) Option {
 	return func(cfg *config) {

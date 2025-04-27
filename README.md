@@ -15,6 +15,10 @@ Features:
 ~ $ go get github.com/hasansino/etcd2cfg
 ```
 
+## Notes
+
+Works only with exported fields. If embedded structs are used, they must be exported.
+
 ## Examples
 
 ### Basic
@@ -23,7 +27,6 @@ Features:
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"time"
@@ -227,8 +230,7 @@ func main() {
 			dbConfig,
 			client,
 			etcd2cfg.WithRunInterval(30*time.Second),
-			etcd2cfg.WithCallbacks(configChangeCallback),
-			etcd2cfg.WithDisableCache(true), // Always fetch fresh values
+			etcd2cfg.WithCallback(configChangeCallback),
 		)
 		if err != nil {
 			log.Fatalf("Auto-update failed: %v", err)
@@ -346,8 +348,8 @@ func main() {
 			client,
 			etcd2cfg.WithRunInterval(1*time.Minute),
 			etcd2cfg.WithLogger(logger),
-			etcd2cfg.WithCallbacks(serverConfigCallback, dbConfigCallback),
-			etcd2cfg.WithDisableCache(false),
+			etcd2cfg.WithCallback(serverConfigCallback),
+			etcd2cfg.WithCallback(dbConfigCallback),
 			etcd2cfg.WithTagName("mycustomtag"), // Use custom tag for some fields
 			etcd2cfg.WithClientTimeout(3*time.Second),
 		)
@@ -361,8 +363,7 @@ func main() {
 		cfg,
 		client,
 		etcd2cfg.WithLogger(logger),
-		etcd2cfg.WithCallbacks(serverConfigCallback),
-		etcd2cfg.WithDisableCache(true),
+		etcd2cfg.WithCallback(serverConfigCallback),
 		etcd2cfg.WithTagName("etcd"),
 		etcd2cfg.WithClientTimeout(3*time.Second),
 	)

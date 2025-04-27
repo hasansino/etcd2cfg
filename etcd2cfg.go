@@ -34,8 +34,6 @@ type config struct {
 	logger        *slog.Logger
 	client        etcdClientAccessor
 	clientTimeout time.Duration
-	clientCache   map[string]string
-	disableCache  bool
 	runInterval   time.Duration
 	callbacks     []CallbackFn
 }
@@ -53,19 +51,24 @@ func Sync(
 		logger:        slog.New(slog.DiscardHandler),
 		client:        client,
 		clientTimeout: 5 * time.Second,
-		clientCache:   make(map[string]string),
-		disableCache:  false,
 		runInterval:   5 * time.Minute,
 		callbacks:     []CallbackFn{},
 	}
-	for _, opt := range opts {
-		opt(libCfg)
+
+	if len(opts) > 0 {
+		for _, opt := range opts {
+			opt(libCfg)
+		}
+	}
+
+	err := bind(libCfg, target)
+	if err != nil {
+		return err
 	}
 
 	go func() {
 		ticker := time.NewTicker(libCfg.runInterval)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ctx.Done():
@@ -95,14 +98,16 @@ func Bind(target interface{}, client etcdClientAccessor, opts ...Option) error {
 		logger:        slog.New(slog.DiscardHandler),
 		client:        client,
 		clientTimeout: 5 * time.Second,
-		clientCache:   make(map[string]string),
-		disableCache:  false,
 		runInterval:   0,
 		callbacks:     []CallbackFn{},
 	}
-	for _, opt := range opts {
-		opt(libCfg)
+
+	if len(opts) > 0 {
+		for _, opt := range opts {
+			opt(libCfg)
+		}
 	}
+
 	return bind(libCfg, target)
 }
 
@@ -132,14 +137,23 @@ func bind(libCfg *config, target interface{}) error {
 			value = rv.FieldByName(field.Name)
 		)
 
-		// skip unexported, will panic @ downstream code otherwise
-		if len(field.PkgPath) != 0 {
+		// skip unexported
+		if !field.IsExported() {
+			continue
+		}
+
+		// avoid mutex fields
+		if field.Type == reflect.TypeOf(sync.Mutex{}) ||
+			field.Type == reflect.TypeOf(sync.RWMutex{}) {
 			continue
 		}
 
 		switch field.Type.Kind() {
 		case reflect.Struct:
-			return bind(libCfg, value.Addr().Interface())
+			err := bind(libCfg, value.Addr().Interface())
+			if err != nil {
+				return err
+			}
 		default:
 			if secretPath := field.Tag.Get(libCfg.tagName); len(secretPath) > 0 {
 				libCfg.logger.Debug(
@@ -161,18 +175,9 @@ func bind(libCfg *config, target interface{}) error {
 // v is a pointer to the reflected field we need to retrieve value for.
 // path is a path in etcd
 func processBinding(libCfg *config, f reflect.StructField, v reflect.Value, path string) error {
-	var etcdValue string
-	if _, ok := libCfg.clientCache[path]; !ok || libCfg.disableCache {
-		var err error
-		etcdValue, err = retrieveData(libCfg.client, libCfg.clientTimeout, path)
-		if err != nil {
-			return err
-		}
-		if !libCfg.disableCache {
-			libCfg.clientCache[path] = etcdValue
-		}
-	} else {
-		etcdValue = libCfg.clientCache[path]
+	etcdValue, err := retrieveData(libCfg.client, libCfg.clientTimeout, path)
+	if err != nil {
+		return err
 	}
 
 	libCfg.logger.Debug(
@@ -181,6 +186,15 @@ func processBinding(libCfg *config, f reflect.StructField, v reflect.Value, path
 		slog.String("path", path),
 		slog.String("value", etcdValue),
 	)
+
+	if etcdValue == "" {
+		libCfg.logger.Debug(
+			"binding -> etcd value is empty",
+			slog.String("field", f.Name),
+			slog.String("path", path),
+		)
+		return nil
+	}
 
 	prevValue := v.Interface()
 
@@ -318,7 +332,7 @@ func retrieveData(cl etcdClientAccessor, timeout time.Duration, path string) (st
 		return "", err
 	}
 	if len(resp.Kvs) == 0 {
-		return "", errors.New("no data found")
+		return "", nil
 	}
 	return string(resp.Kvs[0].Value), nil
 }
